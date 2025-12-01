@@ -1,0 +1,43 @@
+# Development Dockerfile for Gateway Service
+# Multi-stage build for development environment
+
+FROM node:18-alpine AS development
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies needed for development
+RUN apk add --no-cache \
+    bash \
+    curl \
+    git
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S gateway -u 1001 -G nodejs
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+
+# Install dependencies including devDependencies for development
+RUN npm ci --only=development && \
+    npm cache clean --force
+
+# Copy source code
+COPY src/ ./src/
+
+# Change ownership to non-root user
+RUN chown -R gateway:nodejs /app
+
+# Switch to non-root user
+USER gateway
+
+# Expose the gateway port (5921 as per README requirements)
+EXPOSE 5921
+
+# Add health check for development monitoring
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:5921/health || exit 1
+
+# Start the development server with hot reloading
+CMD ["npm", "run", "dev"]
