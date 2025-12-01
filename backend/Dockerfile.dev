@@ -3,42 +3,31 @@
 
 FROM node:18-alpine AS development
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies needed for development
 RUN apk add --no-cache \
     bash \
     curl \
     git
 
-# Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S backend -u 1001 -G nodejs
 
-# Copy package files first for better layer caching
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies including devDependencies for development
 RUN npm install && \
     npm cache clean --force
 
-# Copy source code
 COPY src/ ./src/
 
-# Change ownership to non-root user
 RUN chown -R backend:nodejs /app
 
-# Switch to non-root user
 USER backend
 
-# Expose the backend port (3847 as per README requirements)
 EXPOSE 3847
 
-# Add health check for development monitoring
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:3847/api/health || exit 1
 
-# Start the development server with hot reloading
 CMD ["npm", "run", "dev"]
