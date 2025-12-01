@@ -1,6 +1,124 @@
-# services:
-  # backend:
+version: '3.8'
 
-  # gateway:
+services:
+  # MongoDB Database Service
+  mongo:
+    image: mongo:7.0-jammy
+    container_name: hackathon-mongo-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+    # DEVELOPMENT ONLY: MongoDB exposed for debugging - remove in production
+    ports:
+      - "27017:27017"
+    volumes:
+      # Persistent data storage for development
+      - mongo_data_dev:/data/db
+      - mongo_config_dev:/data/configdb
+    networks:
+      - hackathon-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # mongo:
+  # Backend Service (Node.js + TypeScript)
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.dev
+    container_name: hackathon-backend-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      BACKEND_PORT: 3847
+      MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/${MONGO_DATABASE}?authSource=admin
+      MONGO_DATABASE: ${MONGO_DATABASE}
+    # SECURITY: Backend NOT exposed - only accessible through gateway
+    # ports:
+    #   - "3847:3847"  # Commented out for security compliance
+    volumes:
+      # Mount source code for hot reloading
+      - ../backend/src:/app/src:ro
+      - ../backend/package.json:/app/package.json:ro
+      - ../backend/tsconfig.json:/app/tsconfig.json:ro
+      # Exclude node_modules to prevent conflicts
+      - /app/node_modules
+    networks:
+      - hackathon-network
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3847/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    develop:
+      watch:
+        - action: sync
+          path: ../backend/src
+          target: /app/src
+          ignore:
+            - node_modules/
+        - action: rebuild
+          path: ../backend/package.json
+
+  # Gateway Service (API Gateway)
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile.dev
+    container_name: hackathon-gateway-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      GATEWAY_PORT: 5921
+      BACKEND_URL: http://backend:3847
+    ports:
+      # Only exposed service - main entry point
+      - "5921:5921"
+    volumes:
+      # Mount source code for hot reloading
+      - ../gateway/src:/app/src:ro
+      - ../gateway/package.json:/app/package.json:ro
+      # Exclude node_modules to prevent conflicts
+      - /app/node_modules
+    networks:
+      - hackathon-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5921/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    develop:
+      watch:
+        - action: sync
+          path: ../gateway/src
+          target: /app/src
+          ignore:
+            - node_modules/
+        - action: rebuild
+          path: ../gateway/package.json
+
+# Named volumes for data persistence
+volumes:
+  mongo_data_dev:
+    driver: local
+  mongo_config_dev:
+    driver: local
+
+# Custom network for service communication
+networks:
+  hackathon-network:
+    driver: bridge
+    name: hackathon-dev-network
